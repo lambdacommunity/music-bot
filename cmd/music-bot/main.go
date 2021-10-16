@@ -43,13 +43,14 @@ type Bot struct {
 func (b *Bot) Play(e *gateway.MessageCreateEvent) error {
 	video, err := b.YoutubeClient.GetVideo(e.Message.Content)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to get youtube video")
 	}
 
-	formats := video.Formats.WithAudioChannels() // only get videos with audio
+	formats := video.Formats.Type("audio").WithAudioChannels()
+	formats.Sort()
 	stream, _, err := b.YoutubeClient.GetStream(video, &formats[0])
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to get youtube audio stream")
 	}
 
 	ffmpeg := exec.Command(
@@ -77,27 +78,25 @@ func (b *Bot) Play(e *gateway.MessageCreateEvent) error {
 
 	stdout, err := ffmpeg.StdoutPipe()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to create pipe between bot and ffmpeg")
 	}
-	err = ffmpeg.Start()
-	if err != nil {
-		return err
+
+	if err = ffmpeg.Start(); err != nil {
+		return errors.Wrap(err, "failed to start ffmpeg")
 	}
 
 	session, err := voice.NewSession(b.Ctx.State)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to create voice session")
 	}
 
 	voiceState, err := b.Ctx.State.VoiceState(e.GuildID, e.Author.ID)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to get voice state")
 	}
 
-	userChannelID := voiceState.ChannelID
-	err = session.JoinChannel(e.GuildID, userChannelID, false, true)
-	if err != nil {
-		return err
+	if err = session.JoinChannel(e.GuildID, voiceState.ChannelID, false, true); err != nil {
+		return errors.Wrap(err, "failed to join channel")
 	}
 	defer session.Leave()
 
@@ -113,7 +112,7 @@ func (b *Bot) Play(e *gateway.MessageCreateEvent) error {
 	}
 
 	if err := ffmpeg.Wait(); err != nil {
-		return err
+		return errors.Wrap(err, "failed to wait ffmpeg")
 	}
 
 	return nil

@@ -3,6 +3,7 @@ module github.com/lambdacommunity/music-bot
 go 1.17
 
 require (
+	github.com/davecgh/go-spew v1.1.1
 	github.com/diamondburned/arikawa/v3 v3.0.0-rc.2
 	github.com/diamondburned/oggreader v0.0.0-20201118014549-87df9534b647
 	github.com/joho/godotenv v1.4.0
