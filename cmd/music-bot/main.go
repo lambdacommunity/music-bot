@@ -117,7 +117,3 @@ func (b *Bot) Play(e *gateway.MessageCreateEvent) error {
 
 	return nil
 }
-
-func (b *Bot) Ping(e *gateway.MessageCreateEvent) (string, error) {
-	return "Pong!", nil
-}
