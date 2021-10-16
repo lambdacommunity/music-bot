@@ -11,7 +11,7 @@ import (
 
 func main() {
 	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
+		log.Fatal("error loading .env file")
 	}
 
 	bot.Run(os.Getenv("DISCORD_TOKEN"), &Bot{},
@@ -20,12 +20,13 @@ func main() {
 			return nil
 		},
 	)
+
 }
 
 type Bot struct {
 	Ctx *bot.Context
 }
 
-func (b *Bot) Ping(*gateway.MessageCreateEvent) (string, error) {
+func (b *Bot) Ping(e *gateway.MessageCreateEvent) (string, error) {
 	return "Pong!", nil
 }
