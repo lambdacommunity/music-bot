@@ -1,9 +1,11 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/diamondburned/arikawa/v3/voice"
@@ -39,6 +41,8 @@ type Bot struct {
 	Ctx           *bot.Context
 	YoutubeClient youtube.Client
 }
+
+var m = map[string]*pausableReader{}
 
 func (b *Bot) Play(e *gateway.MessageCreateEvent) error {
 	video, err := b.YoutubeClient.GetVideo(e.Message.Content)
@@ -100,20 +104,54 @@ func (b *Bot) Play(e *gateway.MessageCreateEvent) error {
 	}
 	defer session.Leave()
 
-	udp := session.VoiceUDPConn()
-	udp.ResetFrequency(60*time.Millisecond, 2880)
+	in := session.VoiceUDPConn()
+	in.ResetFrequency(60*time.Millisecond, 2880)
 
 	if err := session.Speaking(voicegateway.Microphone); err != nil {
 		return errors.Wrap(err, "failed to send speaking")
 	}
 
-	if err := oggreader.DecodeBuffered(udp, stdout); err != nil {
+	out := &pausableReader{
+		r: stdout,
+	}
+
+	m[e.GuildID.String()] = out
+	if err := oggreader.DecodeBuffered(in, out); err != nil {
 		return errors.Wrap(err, "failed to decode ogg")
 	}
 
-	if err := ffmpeg.Wait(); err != nil {
-		return errors.Wrap(err, "failed to wait ffmpeg")
+	return nil
+}
+
+func (b *Bot) Pause(e *gateway.MessageCreateEvent) {
+	if p, ok := m[e.GuildID.String()]; ok {
+		p.Pause()
+	}
+}
+
+type pausableReader struct {
+	r       io.Reader
+	unpause chan struct{}
+	pauseMu sync.Mutex
+}
+
+func (p *pausableReader) Pause() {
+	p.pauseMu.Lock()
+	if p.unpause != nil {
+		close(p.unpause)
+	}
+	p.unpause = make(chan struct{})
+	p.pauseMu.Unlock()
+}
+
+func (p *pausableReader) Read(b []byte) (int, error) {
+	p.pauseMu.Lock()
+	ch := p.unpause
+	p.pauseMu.Unlock()
+
+	if p.unpause != nil {
+		<-ch
 	}
 
-	return nil
+	return p.r.Read(b)
 }
