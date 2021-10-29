@@ -1,12 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
-	"runtime"
 	"sync"
 	"time"
 
@@ -28,16 +26,6 @@ func main() {
 
 	b := &Bot{
 		YoutubeClient: youtube.Client{},
-	}
-
-	if os.Getenv("PROFILE") != "" {
-		go func() {
-			for {
-				time.Sleep(time.Second * 5)
-				PrintMemUsage()
-				time.Sleep(time.Minute)
-			}
-		}()
 	}
 
 	bot.Run(os.Getenv("DISCORD_TOKEN"), b,
@@ -166,20 +154,4 @@ func (p *pausableReader) Read(b []byte) (int, error) {
 	}
 
 	return p.r.Read(b)
-}
-
-// PrintMemUsage outputs the current, total and OS memory being used. As well as the number
-// of garage collection cycles completed.
-func PrintMemUsage() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
-	fmt.Printf("Alloc = %v MiB", bToMb(m.Alloc))
-	fmt.Printf("\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
-	fmt.Printf("\tSys = %v MiB", bToMb(m.Sys))
-	fmt.Printf("\tNumGC = %v\n", m.NumGC)
-}
-
-func bToMb(b uint64) uint64 {
-	return b / 1024 / 1024
 }
