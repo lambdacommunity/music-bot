@@ -40,6 +40,7 @@ func main() {
 		}()
 	}
 
+	b.InitRoutines()
 	bot.Run(os.Getenv("DISCORD_TOKEN"), b,
 		func(ctx *bot.Context) error {
 			voice.AddIntents(b.Ctx.State.Gateway)
@@ -49,9 +50,83 @@ func main() {
 	)
 }
 
+type SessionEventType uint8
+
+const (
+	InitSessionEvent           SessionEventType = 0
+	DisconnChannelSessionEvent SessionEventType = 1
+	ConnChannelSessionEvent    SessionEventType = 2
+)
+
+type SessionEvent struct {
+	EventCode SessionEventType
+	Payload   interface{}
+}
+
 type Bot struct {
 	Ctx           *bot.Context
 	YoutubeClient youtube.Client
+
+	session          *voice.Session
+	sessionChan      chan SessionEvent
+	sessionReplyChan chan error
+}
+
+func (b *Bot) Send(code SessionEventType, payload interface{}) error {
+	b.sessionChan <- SessionEvent{
+		EventCode: code,
+		Payload:   payload,
+	}
+	return <-b.sessionReplyChan
+}
+
+func (b *Bot) InitRoutines() {
+	// Session routine
+	b.sessionChan = make(chan SessionEvent)
+	b.sessionReplyChan = make(chan error, 1)
+
+	go func() {
+		for {
+			var err error
+			var event SessionEvent
+			select {
+			case event = <-b.sessionChan:
+				switch event.EventCode {
+				case InitSessionEvent:
+					b.session, err = voice.NewSession(b.Ctx.State)
+					if err != nil {
+						err = errors.Wrap(err, "failed to create voice session")
+					}
+				case DisconnChannelSessionEvent:
+					err = b.session.Leave()
+					if err != nil {
+						err = errors.Wrap(err, "failed to leave channel")
+					}
+				case ConnChannelSessionEvent:
+					event := event.Payload.(*gateway.MessageCreateEvent)
+					voiceState, err := b.Ctx.State.VoiceState(event.GuildID, event.Author.ID)
+					if err != nil {
+						err = errors.Wrap(err, "failed to create voice state")
+					}
+
+					if err = b.session.JoinChannel(event.GuildID, voiceState.ChannelID, false, true); err != nil {
+						err = errors.Wrap(err, "failed to join channel")
+					}
+				}
+			}
+
+			b.sessionReplyChan <- err
+			time.Sleep(time.Millisecond * 250)
+		}
+	}()
+}
+
+func (b *Bot) Disconnect(e *gateway.MessageCreateEvent) error {
+	return b.Send(DisconnChannelSessionEvent, nil)
+}
+
+func (b *Bot) Dc(e *gateway.MessageCreateEvent) error {
+	return b.Disconnect(e)
 }
 
 var m = map[string]*pausableReader{}
@@ -101,25 +176,24 @@ func (b *Bot) Play(e *gateway.MessageCreateEvent) error {
 		return errors.Wrap(err, "failed to start ffmpeg")
 	}
 
-	session, err := voice.NewSession(b.Ctx.State)
-	if err != nil {
-		return errors.Wrap(err, "failed to create voice session")
+	if b.session == nil {
+		err = b.Send(InitSessionEvent, nil)
+		if err != nil {
+			return err
+		}
 	}
 
-	voiceState, err := b.Ctx.State.VoiceState(e.GuildID, e.Author.ID)
-	if err != nil {
-		return errors.Wrap(err, "failed to get voice state")
+	if b.session.VoiceUDPConn() == nil {
+		err = b.Send(ConnChannelSessionEvent, e)
+		if err != nil {
+			return err
+		}
 	}
 
-	if err = session.JoinChannel(e.GuildID, voiceState.ChannelID, false, true); err != nil {
-		return errors.Wrap(err, "failed to join channel")
-	}
-	defer session.Leave()
-
-	in := session.VoiceUDPConn()
+	in := b.session.VoiceUDPConn()
 	in.ResetFrequency(60*time.Millisecond, 2880)
 
-	if err := session.Speaking(voicegateway.Microphone); err != nil {
+	if err := b.session.Speaking(voicegateway.Microphone); err != nil {
 		return errors.Wrap(err, "failed to send speaking")
 	}
 
